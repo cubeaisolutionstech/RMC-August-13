@@ -7,10 +7,59 @@ const BatchSlipManagement = ({ onNavigate }) => {
   const [activeTab, setActiveTab] = useState("create")
   const [batchSlips, setBatchSlips] = useState([])
   const [searchTerm, setSearchTerm] = useState("")
+  const [generatedReport, setGeneratedReport] = useState(null)
+  const [showReport, setShowReport] = useState(false)
 
-  // Create Batch Slip Form State
+  // Backend URL - update this to match your Flask server
+  const API_BASE_URL = "http://localhost:5000"
+
+  // Updated concrete mix formulas matching Bureau Veritas document exactly
+  const concreteFormulas = {
+    M20: {
+      cement: 330,           // Cement content
+      sand: 849.2,           // Manufactured sand  
+      coarseAggregate20mm: 680.3,  // 20mm Coarse Aggregate
+      coarseAggregate12mm: 453.6,  // 12.5mm Coarse Aggregate (showing as 12MM in report)
+      admixture: 1.49,       // Admixture
+      water: 165.0           // Free Water
+    },
+    M25: {
+      cement: 350,
+      sand: 846.3,
+      coarseAggregate20mm: 678.0,
+      coarseAggregate12mm: 452.0,
+      admixture: 1.93,
+      water: 161.0
+    },
+    M30: {
+      cement: 380,
+      sand: 836.4,
+      coarseAggregate20mm: 670.1,
+      coarseAggregate12mm: 446.7,
+      admixture: 2.47,
+      water: 159.6
+    },
+    M35: {
+      cement: 410,
+      sand: 800.7,
+      coarseAggregate20mm: 668.3,
+      coarseAggregate12mm: 445.5,
+      admixture: 2.67,
+      water: 164.0
+    },
+    M40: {
+      cement: 440,
+      sand: 790.9,
+      coarseAggregate20mm: 660.0,
+      coarseAggregate12mm: 440.0,
+      admixture: 3.08,
+      water: 162.8
+    }
+  }
+
+  // Form state
   const [formData, setFormData] = useState({
-    plantSerialNumber: "3494",
+    plantSerialNumber: "121-ML CR",
     batchDate: new Date().toISOString().split("T")[0],
     batchStartTime: "",
     batchEndTime: "",
@@ -25,37 +74,18 @@ const BatchSlipManagement = ({ onNavigate }) => {
     batcherName: "",
     orderedQuantity: "",
     productionQuantity: "",
-    adjManualQuantity: "",
-    withThisLoad: 0,
-    mixerCapacity: "",
-    batchSize: "",
-    materialData: Array(20).fill().map(() => ({
-      sand: "145.00",
-      mm40: "75.00",
-      mm20: "150.00",
-      mm0: "0.00",
-      cem1: "25.00",
-      cem2: "25.00",
-      cem3: "25.00",
-      water: "45.00",
-      admix1: "0.38",
-    })),
-    totalSand: "1500.00",
-    totalMm40: "3000.00",
-    totalMm20: "0.00",
-    totalCem1: "500.00",
-    totalCem2: "500.00",
-    totalCem3: "500.00",
-    totalWater: "900.00",
-    totalAdmix1: "7.50",
+    adjManualQuantity: "0.00",
+    withThisLoad: "",
+    mixerCapacity: "1.00",
+    batchSize: "1.00",
     clientName: "",
     clientAddress: "",
     clientEmail: "",
     clientGSTIN: "",
-    description: "Concrete M30",
+    description: "",
     hsn: "6810",
     rate: "4000.00",
-    quantity: "15.00",
+    quantity: "",
     unit: "M³",
   })
 
@@ -63,23 +93,21 @@ const BatchSlipManagement = ({ onNavigate }) => {
   const [isGenerating, setIsGenerating] = useState(false)
 
   const recipeOptions = [
+    { code: "M20", name: "M20 Grade Concrete" },
     { code: "M25", name: "M25 Grade Concrete" },
     { code: "M30", name: "M30 Grade Concrete" },
     { code: "M35", name: "M35 Grade Concrete" },
     { code: "M40", name: "M40 Grade Concrete" },
-    { code: "M45", name: "M45 Grade Concrete" },
   ]
 
-  // Load existing batch slips
   useEffect(() => {
-    const savedBatchSlips = localStorage.getItem("batchSlipDetails")
-    if (savedBatchSlips) {
-      setBatchSlips(JSON.parse(savedBatchSlips))
+    const saved = localStorage.getItem("batchSlipDetails")
+    if (saved) {
+      setBatchSlips(JSON.parse(saved))
     }
     
-    // Generate batch number automatically
     if (!formData.batchNumber) {
-      setFormData((prev) => ({
+      setFormData(prev => ({
         ...prev,
         batchNumber: generateBatchNumber(),
       }))
@@ -87,116 +115,256 @@ const BatchSlipManagement = ({ onNavigate }) => {
   }, [])
 
   const generateBatchNumber = () => {
-    const date = new Date()
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, "0")
-    const day = String(date.getDate()).padStart(2, "0")
-    const sequence = String(Math.floor(Math.random() * 1000) + 1).padStart(3, "0")
-    return `${year}${month}${day}${sequence}`
+    const sequence = String(Math.floor(Math.random() * 9000) + 1000)
+    return sequence
   }
 
   const handleInputChange = (e) => {
     const { name, value } = e.target
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }))
+    setFormData(prev => {
+      const updated = { ...prev, [name]: value }
+      
+      if (name === 'recipeCode') {
+        const recipe = recipeOptions.find(r => r.code === value)
+        updated.recipeName = recipe ? recipe.name : ''
+        updated.description = recipe ? `Concrete ${value}` : ''
+      }
+      
+      if (name === 'productionQuantity') {
+        updated.withThisLoad = value
+        updated.quantity = value
+      }
+      
+      return updated
+    })
 
-    // Clear error when user starts typing
     if (errors[name]) {
-      setErrors((prev) => ({
-        ...prev,
-        [name]: "",
-      }))
+      setErrors(prev => ({ ...prev, [name]: "" }))
     }
   }
 
   const validateForm = () => {
     const newErrors = {}
     const requiredFields = [
-      "batchDate", "customer", "recipeCode", "recipeName", 
-      "truckNumber", "truckDriver", "batcherName", "clientName", 
-      "clientAddress", "clientEmail"
+      "customer", "recipeCode", "recipeName", "truckNumber", 
+      "truckDriver", "batcherName", "productionQuantity"
     ]
 
-    requiredFields.forEach((field) => {
-      if (!formData[field] || formData[field].trim() === "") {
+    requiredFields.forEach(field => {
+      if (!formData[field] || formData[field].toString().trim() === "") {
         newErrors[field] = "This field is required"
       }
     })
+
+    if (formData.productionQuantity && parseFloat(formData.productionQuantity) <= 0) {
+      newErrors.productionQuantity = "Production quantity must be greater than 0"
+    }
 
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
   }
 
-  const handleSave = async (e) => {
-    e.preventDefault()
+  // Calculate accurate batch values based on selected recipe and production quantity
+  const calculateBatchValues = (recipeCode, productionQuantity, batchSize) => {
+    const formula = concreteFormulas[recipeCode]
+    if (!formula) return null
 
-    if (!validateForm()) {
-      return
+    const numBatches = Math.ceil(productionQuantity / batchSize)
+    
+    // Calculate target values per batch based on formula (kg per m³)
+    const targetPerBatch = {
+      sand: Math.round(formula.sand * batchSize),
+      moisturePercent: 6, // 6% moisture content as per your requirement
+      coarse6mm: 0, // Not used in current formulation
+      coarse12mm: Math.round(formula.coarseAggregate12mm * batchSize),
+      coarse20mm: Math.round(formula.coarseAggregate20mm * batchSize),
+      cement: Math.round(formula.cement * batchSize),
+      water: Math.round(formula.water * batchSize),
+      msIce: 0, // Set to 0 as per your images
+      admixture: parseFloat((formula.admixture * batchSize).toFixed(2))
     }
+
+    // Calculate total set weights (targets for entire production)
+    const totalSetWeights = {
+      sand: Math.round(formula.sand * productionQuantity),
+      moisturePercent: 6,
+      coarse6mm: 0,
+      coarse12mm: Math.round(formula.coarseAggregate12mm * productionQuantity),
+      coarse20mm: Math.round(formula.coarseAggregate20mm * productionQuantity),
+      cement: Math.round(formula.cement * productionQuantity),
+      water: Math.round(formula.water * productionQuantity),
+      msIce: 0,
+      admixture: parseFloat((formula.admixture * productionQuantity).toFixed(2))
+    }
+
+    return {
+      targetPerBatch,
+      totalSetWeights,
+      numBatches,
+      formula
+    }
+  }
+
+  const generateRandomVariation = (baseValue, materialType = 'default') => {
+    let variationPercent = 2 // Default 2% variation
+    
+    switch (materialType) {
+      case 'sand':
+      case 'aggregate':
+        variationPercent = 1.5 // Tighter control for aggregates
+        break
+      case 'cement':
+        variationPercent = 1.0 // Very tight control for cement
+        break
+      case 'water':
+        variationPercent = 3.0 // Slightly more variation for water
+        break
+      case 'admixture':
+        variationPercent = 4.0 // More variation allowed for admixtures
+        break
+    }
+    
+    const variation = (Math.random() - 0.5) * 2 * (variationPercent / 100)
+    const result = baseValue * (1 + variation)
+    
+    if (materialType === 'admixture') {
+      return Math.max(0, parseFloat(result.toFixed(2)))
+    }
+    return Math.max(0, Math.round(result))
+  }
+
+  const generateBatchTimes = () => {
+    const now = new Date()
+    const endTime = now.toTimeString().slice(0, 5)
+    const startTime = new Date(now.getTime() - (15 + Math.random() * 15) * 60000).toTimeString().slice(0, 5)
+    
+    return { startTime, endTime }
+  }
+
+  const generateBatchReport = () => {
+    if (!validateForm()) return
 
     setIsGenerating(true)
 
     try {
-      const batchSlipData = {
-        id: Date.now(),
-        plantSerialNumber: formData.plantSerialNumber,
-        batchDate: formData.batchDate,
-        batchStartTime: formData.batchStartTime,
-        batchEndTime: formData.batchEndTime,
-        batchNumber: formData.batchNumber,
-        customer: formData.customer,
-        site: formData.site,
-        recipeCode: formData.recipeCode,
-        recipeName: formData.recipeName,
-        truckNumber: formData.truckNumber,
-        truckDriver: formData.truckDriver,
-        orderNumber: formData.orderNumber,
-        batcherName: formData.batcherName,
-        orderedQuantity: formData.orderedQuantity,
-        productionQuantity: formData.productionQuantity,
-        adjManualQuantity: formData.adjManualQuantity,
-        withThisLoad: formData.withThisLoad,
-        mixerCapacity: formData.mixerCapacity,
-        batchSize: formData.batchSize,
-        clientName: formData.clientName,
-        clientAddress: formData.clientAddress,
-        clientEmail: formData.clientEmail,
-        clientGSTIN: formData.clientGSTIN,
-        description: formData.description,
-        hsn: formData.hsn,
-        quantity: formData.quantity,
-        rate: formData.rate,
-        unit: formData.unit,
-        materialData: formData.materialData,
-        totals: {
-          totalSand: formData.totalSand,
-          totalMm40: formData.totalMm40,
-          totalMm20: formData.totalMm20,
-          totalCem1: formData.totalCem1,
-          totalCem2: formData.totalCem2,
-          totalCem3: formData.totalCem3,
-          totalWater: formData.totalWater,
-          totalAdmix1: formData.totalAdmix1,
-        },
-        createdAt: new Date().toISOString(),
-        status: "Active",
+      const productionQty = parseFloat(formData.productionQuantity)
+      const batchSize = parseFloat(formData.batchSize)
+
+      const batchCalculations = calculateBatchValues(formData.recipeCode, productionQty, batchSize)
+      
+      if (!batchCalculations) {
+        throw new Error("Invalid recipe code selected")
       }
 
-      // Save to localStorage
-      const updatedBatchSlips = [...batchSlips, batchSlipData]
-      setBatchSlips(updatedBatchSlips)
-      localStorage.setItem("batchSlipDetails", JSON.stringify(updatedBatchSlips))
+      const { targetPerBatch, totalSetWeights, numBatches, formula } = batchCalculations
+      const { startTime, endTime } = generateBatchTimes()
 
-      alert("Batch slip created successfully!")
-      resetForm()
-      setActiveTab("details") // Switch to details tab after successful creation
+      // Generate individual batch data with realistic variations
+      const batchData = []
+      let startingSeq = 430 + Math.floor(Math.random() * 50) // Random starting sequence number
+      
+      for (let i = 0; i < numBatches; i++) {
+        const batchSeq = startingSeq + i
+        batchData.push({
+          seq: batchSeq,
+          coarse12mm: generateRandomVariation(targetPerBatch.coarse12mm, 'aggregate'),
+          sand: generateRandomVariation(targetPerBatch.sand, 'sand'),
+          moisturePercent: "0.0", // As per your image format
+          coarse6mm: 0,
+          coarse20mm: generateRandomVariation(targetPerBatch.coarse20mm, 'aggregate'),
+          cement: generateRandomVariation(targetPerBatch.cement, 'cement'),
+          water: generateRandomVariation(targetPerBatch.water, 'water'),
+          msIce: 0, // Set to 0 as per your images
+          admixture: generateRandomVariation(targetPerBatch.admixture, 'admixture')
+        })
+      }
+
+      // Calculate actual totals from generated batch data
+      const actualTotals = {
+        coarse12mm: batchData.reduce((sum, batch) => sum + batch.coarse12mm, 0),
+        sand: batchData.reduce((sum, batch) => sum + batch.sand, 0),
+        moisturePercent: "0.0",
+        coarse6mm: 0,
+        coarse20mm: batchData.reduce((sum, batch) => sum + batch.coarse20mm, 0),
+        cement: batchData.reduce((sum, batch) => sum + batch.cement, 0),
+        water: batchData.reduce((sum, batch) => sum + batch.water, 0),
+        msIce: 0,
+        admixture: parseFloat(batchData.reduce((sum, batch) => sum + batch.admixture, 0).toFixed(1))
+      }
+
+      const report = {
+        ...formData,
+        batchStartTime: startTime,
+        batchEndTime: endTime,
+        numBatches,
+        formula,
+        targetPerBatch,
+        totalSetWeights,
+        batchData,
+        actualTotals,
+        generatedAt: new Date().toISOString()
+      }
+
+      setGeneratedReport(report)
+      setShowReport(true)
+
     } catch (error) {
-      console.error("Error:", error)
+      console.error("Error generating report:", error)
       alert(`Error: ${error.message}`)
     } finally {
       setIsGenerating(false)
+    }
+  }
+
+  const saveBatchSlip = async () => {
+    if (generatedReport) {
+      try {
+        // Save to backend
+        const response = await fetch(`${API_BASE_URL}/batch-slips`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(generatedReport)
+        })
+
+        if (response.ok) {
+          // Also save locally
+          const batchSlipData = {
+            id: Date.now(),
+            ...generatedReport,
+            status: "Active",
+            createdAt: new Date().toISOString()
+          }
+
+          const updated = [...batchSlips, batchSlipData]
+          setBatchSlips(updated)
+          localStorage.setItem("batchSlipDetails", JSON.stringify(updated))
+          
+          alert("Batch slip saved successfully!")
+          setShowReport(false)
+          resetForm()
+        } else {
+          throw new Error('Failed to save to backend')
+        }
+      } catch (error) {
+        console.error('Error saving batch slip:', error)
+        // Still save locally even if backend fails
+        const batchSlipData = {
+          id: Date.now(),
+          ...generatedReport,
+          status: "Active",
+          createdAt: new Date().toISOString()
+        }
+
+        const updated = [...batchSlips, batchSlipData]
+        setBatchSlips(updated)
+        localStorage.setItem("batchSlipDetails", JSON.stringify(updated))
+        
+        alert("Batch slip saved locally (backend connection failed)")
+        setShowReport(false)
+        resetForm()
+      }
     }
   }
 
@@ -204,7 +372,6 @@ const BatchSlipManagement = ({ onNavigate }) => {
     setFormData({
       ...formData,
       batchNumber: generateBatchNumber(),
-      batchDate: new Date().toISOString().split("T")[0],
       customer: "",
       site: "",
       recipeCode: "",
@@ -213,43 +380,308 @@ const BatchSlipManagement = ({ onNavigate }) => {
       truckDriver: "",
       orderNumber: "",
       batcherName: "",
+      productionQuantity: "",
+      withThisLoad: "",
       clientName: "",
       clientAddress: "",
       clientEmail: "",
       clientGSTIN: "",
+      description: "",
+      quantity: "",
     })
     setErrors({})
+    setGeneratedReport(null)
+    setShowReport(false)
+  }
+
+  const downloadPDF = () => {
+    const printWindow = window.open('', '_blank')
+    const reportHTML = generateReportHTML(generatedReport)
+    
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Batch Slip - ${generatedReport.batchNumber}</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 10px; font-size: 12px; }
+            table { width: 100%; border-collapse: collapse; margin: 5px 0; }
+            th, td { border: 1px solid #000; padding: 4px; text-align: center; font-size: 10px; }
+            th { background: #f0f0f0; font-weight: bold; }
+            .header-table { border: 2px solid #000; margin-bottom: 10px; }
+            .material-table { border: 2px solid #000; }
+            @media print { 
+              button { display: none; } 
+              body { margin: 5px; }
+            }
+          </style>
+        </head>
+        <body>
+          ${reportHTML}
+          <button onclick="window.print()" style="margin-top: 20px; padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px;">Print PDF</button>
+        </body>
+      </html>
+    `)
+    printWindow.document.close()
+  }
+
+  const generateReportHTML = (report) => {
+    if (!report) return ""
+
+    const targets = report.targetPerBatch
+    const totals = report.totalSetWeights
+
+    return `
+      <div style="background: white; padding: 15px; font-family: Arial, sans-serif;">
+        <!-- Header Section -->
+        <div style="text-align: center; margin-bottom: 20px;">
+          <div style="display: flex; align-items: center; justify-content: center; gap: 20px; margin-bottom: 10px;">
+            <div style="width: 50px; height: 60px; background: #4CAF50; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 8px; border: 2px solid #333; flex-direction: column;">
+              SCHWING<br>Stetter
+            </div>
+            <div>
+              <h2 style="margin: 0; font-size: 16px; font-weight: bold;">THULASI READY MIX - ERODE</h2>
+              <p style="margin: 2px 0; font-size: 12px;">MC1370 Control System Ver 1.0</p>
+            </div>
+          </div>
+          <h3 style="margin: 10px 0; font-size: 14px; font-weight: bold;">Docket / Batch Report / Autographic Record</h3>
+        </div>
+
+        <!-- Batch Information Table -->
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 14px;">
+          <tr>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Batch Date</td>
+            <td style="padding: 6px 10px; font-size: 14px;">: ${new Date(report.batchDate).toLocaleDateString('en-GB').replace(/\//g, '-')}</td>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Plant Serial Number</td>
+            <td style="padding: 6px 10px; font-size: 14px;">${report.plantSerialNumber}</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Batch Start Time</td>
+            <td style="padding: 6px 10px; font-size: 14px;">: ${report.batchStartTime}</td>
+            <td style="padding: 6px 10px;"></td>
+            <td style="padding: 6px 10px;"></td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Batch End Time</td>
+            <td style="padding: 6px 10px; font-size: 14px;">: ${report.batchEndTime}</td>
+            <td style="padding: 6px 10px;"></td>
+            <td style="padding: 6px 10px;"></td>
+          </tr>
+          <tr><td colspan="4" style="height: 10px;"></td></tr>
+          <tr>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Batch Number / Docket Number:</td>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">${report.batchNumber}</td>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Ordered Quantity</td>
+            <td style="padding: 6px 10px; font-size: 14px;">: ${report.orderedQuantity || '0.00'} M³</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Customer</td>
+            <td style="padding: 6px 10px; font-size: 14px;">: ${report.customer}</td>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Production Quantity</td>
+            <td style="padding: 6px 10px; font-size: 14px;">: ${report.productionQuantity} M³</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Site</td>
+            <td style="padding: 6px 10px; font-size: 14px;">: ${report.site || 'N/A'}</td>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Adj/Manual Quantity</td>
+            <td style="padding: 6px 10px; font-size: 14px;">: ${report.adjManualQuantity} M³</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Recipe Code</td>
+            <td style="padding: 6px 10px; font-size: 14px;">: ${report.recipeCode}</td>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">With This Load</td>
+            <td style="padding: 6px 10px; font-size: 14px;">: ${report.withThisLoad} M³</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Recipe Name</td>
+            <td style="padding: 6px 10px; font-size: 14px;">: ${report.recipeName}</td>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Mixer Capacity</td>
+            <td style="padding: 6px 10px; font-size: 14px;">: ${report.mixerCapacity} M³</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Truck Number</td>
+            <td style="padding: 6px 10px; font-size: 14px;">: ${report.truckNumber}</td>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Batch Size</td>
+            <td style="padding: 6px 10px; font-size: 14px;">: ${report.batchSize} M³</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Truck Driver</td>
+            <td style="padding: 6px 10px; font-size: 14px;">: ${report.truckDriver}</td>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Net Wt From W.Bridge</td>
+            <td style="padding: 6px 10px; font-size: 14px;">0.00 Kg</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Order Number</td>
+            <td style="padding: 6px 10px; font-size: 14px;">: ${report.orderNumber || '0'}</td>
+            <td style="padding: 6px 10px;"></td>
+            <td style="padding: 6px 10px;"></td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 10px; font-weight: bold; font-size: 14px;">Batcher Name</td>
+            <td style="padding: 6px 10px; font-size: 14px;">: ${report.batcherName}</td>
+            <td style="padding: 6px 10px;"></td>
+            <td style="padding: 6px 10px;"></td>
+          </tr>
+        </table>
+
+        <!-- Material Data Table -->
+        <table style="width: 100%; border-collapse: collapse; border: 3px solid #000; font-size: 12px;">
+          <thead>
+            <tr style="background: #f0f0f0;">
+              <th colspan="5" style="border: 2px solid #000; padding: 8px; text-align: center; font-weight: bold; font-size: 13px;">Aggregate</th>
+              <th colspan="3" style="border: 2px solid #000; padding: 8px; text-align: center; font-weight: bold; font-size: 13px;">Cement</th>
+              <th style="border: 2px solid #000; padding: 8px; text-align: center; font-weight: bold; font-size: 13px;">Water</th>
+              <th style="border: 2px solid #000; padding: 8px; text-align: center; font-weight: bold; font-size: 13px;">MS / ICE</th>
+              <th style="border: 2px solid #000; padding: 8px; text-align: center; font-weight: bold; font-size: 13px;">Admixture</th>
+            </tr>
+            <tr>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 600;">12MM</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 600;">M SAND</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 600;">Moi</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 600;">6MM</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 600;">20 MM</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 600;">CEM1</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 600;">CEM2</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 600;">CEM3</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 600;">WATER</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 600;">-</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 10px; font-weight: 600;">ADMIX1</td>
+            </tr>
+            <tr style="background: #f8f8f8;">
+              <td style="border: 2px solid #000; padding: 6px; font-weight: bold; text-align: left; font-size: 12px;" colspan="11">Targets based on batchsize in Kgs.</td>
+            </tr>
+            <tr>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: 500;">${targets.coarse12mm}</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: 500;">${targets.sand}</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: 500;">In %</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: 500;">0</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: 500;">${targets.coarse20mm}</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: 500;">0</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: 500;">0</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: 500;">${targets.cement}</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: 500;">${targets.water}</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: 500;">0</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: 500;">${targets.admixture}</td>
+            </tr>
+            <tr style="background: #f8f8f8;">
+              <td style="border: 2px solid #000; padding: 6px; font-weight: bold; text-align: left; font-size: 12px;" colspan="11">Actual in Kgs.</td>
+            </tr>
+            ${report.batchData.map(batch => `
+              <tr>
+                <td style="border: 2px solid #000; padding: 3px; text-align: center; font-size: 11px; font-weight: 500;">${batch.coarse12mm}</td>
+                <td style="border: 2px solid #000; padding: 3px; text-align: center; font-size: 11px; font-weight: 500;">${batch.sand}</td>
+                <td style="border: 2px solid #000; padding: 3px; text-align: center; font-size: 11px; font-weight: 500;">${batch.moisturePercent}</td>
+                <td style="border: 2px solid #000; padding: 3px; text-align: center; font-size: 11px; font-weight: 500;">${batch.coarse6mm}</td>
+                <td style="border: 2px solid #000; padding: 3px; text-align: center; font-size: 11px; font-weight: 500;">${batch.coarse20mm}</td>
+                <td style="border: 2px solid #000; padding: 3px; text-align: center; font-size: 11px; font-weight: 500;">0</td>
+                <td style="border: 2px solid #000; padding: 3px; text-align: center; font-size: 11px; font-weight: 500;">0</td>
+                <td style="border: 2px solid #000; padding: 3px; text-align: center; font-size: 11px; font-weight: 500;">${batch.cement}</td>
+                <td style="border: 2px solid #000; padding: 3px; text-align: center; font-size: 11px; font-weight: 500;">${batch.water}</td>
+                <td style="border: 2px solid #000; padding: 3px; text-align: center; font-size: 11px; font-weight: 500;">${batch.msIce}</td>
+                <td style="border: 2px solid #000; padding: 3px; text-align: center; font-size: 11px; font-weight: 500;">${batch.admixture}</td>
+              </tr>
+            `).join('')}
+            <tr style="background: #f0f0f0; font-weight: bold;">
+              <td style="border: 2px solid #000; padding: 6px; text-align: left; font-size: 12px; font-weight: bold;" colspan="11">Total Set Weight in Kgs.</td>
+            </tr>
+            <tr style="font-weight: bold;">
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">${totals.coarse12mm}</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">${totals.sand}</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">${totals.moisturePercent}</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">0</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">${totals.coarse20mm}</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">0</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">0</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">${totals.cement}</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">${totals.water}</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">0</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">${totals.admixture}</td>
+            </tr>
+            <tr style="background: #f0f0f0; font-weight: bold;">
+              <td style="border: 2px solid #000; padding: 6px; text-align: left; font-size: 12px; font-weight: bold;" colspan="11">Total Actual in Kgs.</td>
+            </tr>
+            <tr style="font-weight: bold;">
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">${report.actualTotals.coarse12mm}</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">${report.actualTotals.sand}</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">${report.actualTotals.moisturePercent}</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">0</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">${report.actualTotals.coarse20mm}</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">0</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">0</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">${report.actualTotals.cement}</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">${report.actualTotals.water}</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">0</td>
+              <td style="border: 2px solid #000; padding: 4px; text-align: center; font-size: 11px; font-weight: bold;">${report.actualTotals.admixture}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    `
   }
 
   const handleDelete = (id) => {
     if (window.confirm("Are you sure you want to delete this batch slip?")) {
-      const updatedBatchSlips = batchSlips.filter((slip) => slip.id !== id)
-      setBatchSlips(updatedBatchSlips)
-      localStorage.setItem("batchSlipDetails", JSON.stringify(updatedBatchSlips))
+      const updated = batchSlips.filter(slip => slip.id !== id)
+      setBatchSlips(updated)
+      localStorage.setItem("batchSlipDetails", JSON.stringify(updated))
     }
   }
 
   const exportToExcel = () => {
     const worksheet = XLSX.utils.json_to_sheet(batchSlips)
     const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Batch Slip Details")
-    XLSX.writeFile(workbook, "batch_slip_details.xlsx")
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Batch Slips")
+    XLSX.writeFile(workbook, "batch_slips.xlsx")
   }
 
-  const filteredBatchSlips = batchSlips.filter((slip) =>
+  const filteredBatchSlips = batchSlips.filter(slip =>
     (slip.batchNumber || '').toLowerCase().includes((searchTerm || '').toLowerCase()) ||
     (slip.customer || '').toLowerCase().includes((searchTerm || '').toLowerCase()) ||
     (slip.recipeCode || '').toLowerCase().includes((searchTerm || '').toLowerCase())
   )
 
-  return (
-    <div className="batch-slip-management">
-      <div className="section-header">
-        <div className="section-title">
-          <div className="section-icon">📋</div>
-          <h2>Batch Slip Management</h2>
+  if (showReport && generatedReport) {
+    return (
+      <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto', background: 'white' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', padding: '20px', background: '#f8f9fa', borderRadius: '8px' }}>
+          <h2>Generated Batch Slip Report</h2>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button 
+              onClick={() => setShowReport(false)}
+              style={{ padding: '10px 20px', border: 'none', borderRadius: '6px', background: '#6c757d', color: 'white', cursor: 'pointer' }}
+            >
+              ← Back to Form
+            </button>
+            <button 
+              onClick={downloadPDF}
+              style={{ padding: '10px 20px', border: 'none', borderRadius: '6px', background: '#17a2b8', color: 'white', cursor: 'pointer' }}
+            >
+              📄 Download PDF
+            </button>
+            <button 
+              onClick={saveBatchSlip}
+              style={{ padding: '10px 20px', border: 'none', borderRadius: '6px', background: '#28a745', color: 'white', cursor: 'pointer' }}
+            >
+              💾 Save Batch Slip
+            </button>
+          </div>
         </div>
-        <div className="header-actions">
+
+        <div 
+          style={{ border: '1px solid #ddd', padding: '30px', background: 'white', fontFamily: 'Arial, sans-serif' }}
+          dangerouslySetInnerHTML={{ __html: generateReportHTML(generatedReport) }} 
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ padding: '20px', maxWidth: '1600px', margin: '0 auto', background: '#f8f9fa', minHeight: '100vh' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', padding: '20px', background: 'white', borderRadius: '12px', boxShadow: '0 2px 10px rgba(0, 0, 0, 0.1)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+          <div style={{ fontSize: '32px', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', padding: '15px', borderRadius: '12px', color: 'white' }}>📋</div>
+          <h2 style={{ margin: 0, color: '#333', fontSize: '28px' }}>Batch Slip Management</h2>
+        </div>
+        <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
           {activeTab === "details" && (
             <>
               <input
@@ -257,9 +689,12 @@ const BatchSlipManagement = ({ onNavigate }) => {
                 placeholder="Search batch slips..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="search-input"
+                style={{ padding: '10px 15px', border: '2px solid #e9ecef', borderRadius: '8px', fontSize: '14px', minWidth: '250px' }}
               />
-              <button className="btn btn-export" onClick={exportToExcel}>
+              <button 
+                onClick={exportToExcel}
+                style={{ padding: '10px 20px', border: 'none', borderRadius: '8px', background: 'linear-gradient(135deg, #17a2b8 0%, #20c997 100%)', color: 'white', cursor: 'pointer' }}
+              >
                 📊 Export Excel
               </button>
             </>
@@ -267,202 +702,245 @@ const BatchSlipManagement = ({ onNavigate }) => {
         </div>
       </div>
 
-      {/* Tab Navigation */}
-      <div className="tab-navigation">
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', padding: '0 20px' }}>
         <button 
-          className={`tab-button ${activeTab === "create" ? "active" : ""}`}
           onClick={() => setActiveTab("create")}
+          style={{ 
+            padding: '12px 24px', 
+            border: 'none', 
+            borderRadius: '8px', 
+            fontSize: '16px', 
+            cursor: 'pointer',
+            background: activeTab === "create" ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : '#e9ecef',
+            color: activeTab === "create" ? 'white' : '#495057'
+          }}
         >
           ➕ Create Batch Slip
         </button>
         <button 
-          className={`tab-button ${activeTab === "details" ? "active" : ""}`}
           onClick={() => setActiveTab("details")}
+          style={{ 
+            padding: '12px 24px', 
+            border: 'none', 
+            borderRadius: '8px', 
+            fontSize: '16px', 
+            cursor: 'pointer',
+            background: activeTab === "details" ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : '#e9ecef',
+            color: activeTab === "details" ? 'white' : '#495057'
+          }}
         >
           📋 View Batch Slips
         </button>
       </div>
 
-      {/* Create Batch Slip Tab */}
       {activeTab === "create" && (
-        <div className="batch-slip-form-container">
-          <form onSubmit={handleSave} className="batch-slip-form">
-            <div className="form-section">
-              <h3>RR CONSTRUCTIONS</h3>
+        <div style={{ background: 'white', padding: '25px', borderRadius: '12px', boxShadow: '0 2px 10px rgba(0, 0, 0, 0.1)' }}>
+          <form onSubmit={(e) => { e.preventDefault(); generateBatchReport(); }}>
+            <div style={{ marginBottom: '30px', paddingBottom: '20px', borderBottom: '2px solid #f1f3f4' }}>
+              <h3 style={{ margin: '0 0 10px 0', color: '#333', fontSize: '24px', textAlign: 'center' }}>THULASI READY MIX - ERODE</h3>
+              <p style={{ textAlign: 'center', color: '#6c757d', fontStyle: 'italic', margin: '5px 0' }}>Batch Slip Creation Form</p>
             </div>
 
-            {/* Batch Information */}
-            <div className="form-section">
-              <h4>Docket / Batch Report / Autographic Record</h4>
-              <div className="form-grid-batch">
-                <div className="form-group">
-                  <label>Plant Serial Number</label>
+            <div style={{ marginBottom: '30px', paddingBottom: '20px', borderBottom: '2px solid #f1f3f4' }}>
+              <h4 style={{ margin: '0 0 20px 0', color: '#495057', fontSize: '18px' }}>Batch Information</h4>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '15px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <label style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>Plant Serial Number</label>
                   <input
                     type="text"
                     name="plantSerialNumber"
                     value={formData.plantSerialNumber}
-                    onChange={handleInputChange}
                     readOnly
-                    className="readonly"
+                    style={{ padding: '10px 12px', border: '2px solid #e9ecef', borderRadius: '8px', fontSize: '14px', backgroundColor: '#f8f9fa', cursor: 'not-allowed' }}
                   />
                 </div>
-                <div className="form-group">
-                  <label>Batch Date *</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <label style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>Batch Date</label>
                   <input
                     type="date"
                     name="batchDate"
                     value={formData.batchDate}
                     onChange={handleInputChange}
-                    className={errors.batchDate ? "error" : ""}
+                    style={{ padding: '10px 12px', border: '2px solid #e9ecef', borderRadius: '8px', fontSize: '14px' }}
                   />
-                  {errors.batchDate && <span className="error-text">{errors.batchDate}</span>}
                 </div>
-                <div className="form-group">
-                  <label>Batch Start Time</label>
-                  <input type="time" name="batchStartTime" value={formData.batchStartTime} onChange={handleInputChange} />
-                </div>
-                <div className="form-group">
-                  <label>Batch End Time</label>
-                  <input type="time" name="batchEndTime" value={formData.batchEndTime} onChange={handleInputChange} />
-                </div>
-                <div className="form-group">
-                  <label>Batch Number *</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <label style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>Batch Number</label>
                   <input
                     type="text"
                     name="batchNumber"
                     value={formData.batchNumber}
                     onChange={handleInputChange}
-                    className={errors.batchNumber ? "error" : ""}
+                    style={{ padding: '10px 12px', border: '2px solid #e9ecef', borderRadius: '8px', fontSize: '14px' }}
                   />
                 </div>
-                <div className="form-group">
-                  <label>Customer *</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <label style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>Customer *</label>
                   <input
                     type="text"
                     name="customer"
                     value={formData.customer}
                     onChange={handleInputChange}
-                    className={errors.customer ? "error" : ""}
-                    placeholder="Client A"
+                    placeholder="TNUHDB-NKL"
+                    style={{ 
+                      padding: '10px 12px', 
+                      border: `2px solid ${errors.customer ? '#dc3545' : '#e9ecef'}`, 
+                      borderRadius: '8px', 
+                      fontSize: '14px' 
+                    }}
                   />
-                  {errors.customer && <span className="error-text">{errors.customer}</span>}
+                  {errors.customer && <span style={{ color: '#dc3545', fontSize: '12px' }}>{errors.customer}</span>}
                 </div>
-                <div className="form-group">
-                  <label>Site</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <label style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>Site</label>
                   <input
                     type="text"
                     name="site"
                     value={formData.site}
                     onChange={handleInputChange}
-                    placeholder="Client A"
+                    placeholder="PALLIPALAYAM"
+                    style={{ padding: '10px 12px', border: '2px solid #e9ecef', borderRadius: '8px', fontSize: '14px' }}
                   />
                 </div>
-                <div className="form-group">
-                  <label>Recipe Code *</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <label style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>Recipe Code *</label>
                   <select
                     name="recipeCode"
                     value={formData.recipeCode}
                     onChange={handleInputChange}
-                    className={errors.recipeCode ? "error" : ""}
+                    style={{ 
+                      padding: '10px 12px', 
+                      border: `2px solid ${errors.recipeCode ? '#dc3545' : '#e9ecef'}`, 
+                      borderRadius: '8px', 
+                      fontSize: '14px' 
+                    }}
                   >
                     <option value="">Select Recipe</option>
-                    {recipeOptions.map((recipe) => (
+                    {recipeOptions.map(recipe => (
                       <option key={recipe.code} value={recipe.code}>
-                        {recipe.code} - {recipe.name}
+                        {recipe.code}
                       </option>
                     ))}
                   </select>
-                  {errors.recipeCode && <span className="error-text">{errors.recipeCode}</span>}
+                  {errors.recipeCode && <span style={{ color: '#dc3545', fontSize: '12px' }}>{errors.recipeCode}</span>}
                 </div>
-                <div className="form-group">
-                  <label>Recipe Name *</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <label style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>Recipe Name *</label>
                   <input
                     type="text"
                     name="recipeName"
                     value={formData.recipeName}
                     onChange={handleInputChange}
-                    className={errors.recipeName ? "error" : ""}
-                    placeholder="Default Recipe"
+                    placeholder="M25 Grade Concrete"
+                    style={{ 
+                      padding: '10px 12px', 
+                      border: `2px solid ${errors.recipeName ? '#dc3545' : '#e9ecef'}`, 
+                      borderRadius: '8px', 
+                      fontSize: '14px' 
+                    }}
                   />
-                  {errors.recipeName && <span className="error-text">{errors.recipeName}</span>}
+                  {errors.recipeName && <span style={{ color: '#dc3545', fontSize: '12px' }}>{errors.recipeName}</span>}
                 </div>
-                <div className="form-group">
-                  <label>Truck Number *</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <label style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>Truck Number *</label>
                   <input
                     type="text"
                     name="truckNumber"
                     value={formData.truckNumber}
                     onChange={handleInputChange}
-                    className={errors.truckNumber ? "error" : ""}
-                    placeholder="tm123564"
+                    placeholder="TN 33 AU 4174"
+                    style={{ 
+                      padding: '10px 12px', 
+                      border: `2px solid ${errors.truckNumber ? '#dc3545' : '#e9ecef'}`, 
+                      borderRadius: '8px', 
+                      fontSize: '14px' 
+                    }}
                   />
-                  {errors.truckNumber && <span className="error-text">{errors.truckNumber}</span>}
+                  {errors.truckNumber && <span style={{ color: '#dc3545', fontSize: '12px' }}>{errors.truckNumber}</span>}
                 </div>
-                <div className="form-group">
-                  <label>Truck Driver *</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <label style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>Truck Driver *</label>
                   <input
                     type="text"
                     name="truckDriver"
                     value={formData.truckDriver}
                     onChange={handleInputChange}
-                    className={errors.truckDriver ? "error" : ""}
-                    placeholder="murugesan"
+                    placeholder="AUDAIYAPPAN"
+                    style={{ 
+                      padding: '10px 12px', 
+                      border: `2px solid ${errors.truckDriver ? '#dc3545' : '#e9ecef'}`, 
+                      borderRadius: '8px', 
+                      fontSize: '14px' 
+                    }}
                   />
-                  {errors.truckDriver && <span className="error-text">{errors.truckDriver}</span>}
+                  {errors.truckDriver && <span style={{ color: '#dc3545', fontSize: '12px' }}>{errors.truckDriver}</span>}
                 </div>
-                <div className="form-group">
-                  <label>Order Number</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <label style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>Order Number</label>
                   <input
                     type="text"
                     name="orderNumber"
                     value={formData.orderNumber}
                     onChange={handleInputChange}
-                    placeholder="1"
+                    placeholder="4"
+                    style={{ padding: '10px 12px', border: '2px solid #e9ecef', borderRadius: '8px', fontSize: '14px' }}
                   />
                 </div>
-                <div className="form-group">
-                  <label>Batcher Name *</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <label style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>Batcher Name *</label>
                   <input
                     type="text"
                     name="batcherName"
                     value={formData.batcherName}
                     onChange={handleInputChange}
-                    className={errors.batcherName ? "error" : ""}
-                    placeholder="ss"
+                    placeholder="Stetter"
+                    style={{ 
+                      padding: '10px 12px', 
+                      border: `2px solid ${errors.batcherName ? '#dc3545' : '#e9ecef'}`, 
+                      borderRadius: '8px', 
+                      fontSize: '14px' 
+                    }}
                   />
-                  {errors.batcherName && <span className="error-text">{errors.batcherName}</span>}
+                  {errors.batcherName && <span style={{ color: '#dc3545', fontSize: '12px' }}>{errors.batcherName}</span>}
                 </div>
               </div>
             </div>
 
-            {/* Quantities Section */}
-            <div className="form-section">
-              <h4>Quantities</h4>
-              <div className="form-grid-quantities">
-                <div className="form-group">
-                  <label>Ordered Quantity (M³)</label>
+            <div style={{ marginBottom: '30px', paddingBottom: '20px', borderBottom: '2px solid #f1f3f4' }}>
+              <h4 style={{ margin: '0 0 20px 0', color: '#495057', fontSize: '18px' }}>Production Details</h4>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '15px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <label style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>Ordered Quantity (M³)</label>
                   <input
                     type="number"
                     step="0.01"
                     name="orderedQuantity"
                     value={formData.orderedQuantity}
                     onChange={handleInputChange}
-                    placeholder="10.00"
+                    placeholder="0.00"
+                    style={{ padding: '10px 12px', border: '2px solid #e9ecef', borderRadius: '8px', fontSize: '14px' }}
                   />
                 </div>
-                <div className="form-group">
-                  <label>Production Quantity (M³)</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <label style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>Production Quantity (M³) *</label>
                   <input
                     type="number"
                     step="0.01"
                     name="productionQuantity"
                     value={formData.productionQuantity}
                     onChange={handleInputChange}
-                    placeholder="10.00"
+                    placeholder="6.50"
+                    style={{ 
+                      padding: '10px 12px', 
+                      border: `2px solid ${errors.productionQuantity ? '#dc3545' : '#e9ecef'}`, 
+                      borderRadius: '8px', 
+                      fontSize: '14px' 
+                    }}
                   />
+                  {errors.productionQuantity && <span style={{ color: '#dc3545', fontSize: '12px' }}>{errors.productionQuantity}</span>}
                 </div>
-                <div className="form-group">
-                  <label>Adj/Manual Quantity (M³)</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <label style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>Adj/Manual Quantity (M³)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -470,165 +948,99 @@ const BatchSlipManagement = ({ onNavigate }) => {
                     value={formData.adjManualQuantity}
                     onChange={handleInputChange}
                     placeholder="0.00"
+                    style={{ padding: '10px 12px', border: '2px solid #e9ecef', borderRadius: '8px', fontSize: '14px' }}
                   />
                 </div>
-                <div className="form-group">
-                  <label>With This Load (M³)</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <label style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>With This Load (M³)</label>
                   <input
                     type="number"
                     step="0.01"
                     name="withThisLoad"
                     value={formData.withThisLoad}
                     onChange={handleInputChange}
-                    placeholder="0.00"
+                    placeholder="Auto-calculated"
+                    readOnly
+                    style={{ padding: '10px 12px', border: '2px solid #e9ecef', borderRadius: '8px', fontSize: '14px', backgroundColor: '#f8f9fa', cursor: 'not-allowed' }}
                   />
                 </div>
-                <div className="form-group">
-                  <label>Mixer Capacity (M³)</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <label style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>Mixer Capacity (M³)</label>
                   <input
                     type="number"
                     step="0.01"
                     name="mixerCapacity"
                     value={formData.mixerCapacity}
                     onChange={handleInputChange}
-                    placeholder="0.00"
+                    placeholder="1.00"
+                    style={{ padding: '10px 12px', border: '2px solid #e9ecef', borderRadius: '8px', fontSize: '14px' }}
                   />
                 </div>
-                <div className="form-group">
-                  <label>Batch Size (M³)</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <label style={{ fontWeight: '600', color: '#333', fontSize: '14px' }}>Batch Size (M³)</label>
                   <input
                     type="number"
                     step="0.01"
                     name="batchSize"
                     value={formData.batchSize}
                     onChange={handleInputChange}
-                    placeholder="0.00"
+                    placeholder="1.00"
+                    style={{ padding: '10px 12px', border: '2px solid #e9ecef', borderRadius: '8px', fontSize: '14px' }}
                   />
                 </div>
               </div>
             </div>
 
-            {/* Client Information */}
-            <div className="form-section">
-              <h4>Client Information (For Invoice)</h4>
-              <div className="form-grid-client">
-                <div className="form-group">
-                  <label>Client Name *</label>
-                  <input
-                    type="text"
-                    name="clientName"
-                    value={formData.clientName}
-                    onChange={handleInputChange}
-                    className={errors.clientName ? "error" : ""}
-                    placeholder="Client B"
-                  />
-                  {errors.clientName && <span className="error-text">{errors.clientName}</span>}
-                </div>
-                <div className="form-group">
-                  <label>Client Address *</label>
-                  <textarea
-                    name="clientAddress"
-                    value={formData.clientAddress}
-                    onChange={handleInputChange}
-                    className={errors.clientAddress ? "error" : ""}
-                    placeholder="No. 123, Salem Main Road, Salem"
-                    rows="3"
-                  />
-                  {errors.clientAddress && <span className="error-text">{errors.clientAddress}</span>}
-                </div>
-                <div className="form-group">
-                  <label>Client Email *</label>
-                  <input
-                    type="email"
-                    name="clientEmail"
-                    value={formData.clientEmail}
-                    onChange={handleInputChange}
-                    className={errors.clientEmail ? "error" : ""}
-                    placeholder="client@example.com"
-                  />
-                  {errors.clientEmail && <span className="error-text">{errors.clientEmail}</span>}
-                </div>
-                <div className="form-group">
-                  <label>Client GSTIN</label>
-                  <input
-                    type="text"
-                    name="clientGSTIN"
-                    value={formData.clientGSTIN}
-                    onChange={handleInputChange}
-                    placeholder="N/A"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Invoice Details */}
-            <div className="form-section">
-              <h4>Invoice Details</h4>
-              <div className="form-grid-invoice">
-                <div className="form-group">
-                  <label>Description</label>
-                  <input
-                    type="text"
-                    name="description"
-                    value={formData.description}
-                    onChange={handleInputChange}
-                    placeholder="Concrete M30"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>HSN Code</label>
-                  <input type="text" name="hsn" value={formData.hsn} onChange={handleInputChange} placeholder="6810" />
-                </div>
-                <div className="form-group">
-                  <label>Quantity</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    name="quantity"
-                    value={formData.quantity}
-                    onChange={handleInputChange}
-                    placeholder="15.00"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Rate (₹)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    name="rate"
-                    value={formData.rate}
-                    onChange={handleInputChange}
-                    placeholder="4000.00"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Unit</label>
-                  <input type="text" name="unit" value={formData.unit} onChange={handleInputChange} placeholder="M³" />
-                </div>
-                <div className="form-group">
-                  <label>Total Amount</label>
-                  <input
-                    type="text"
-                    value={`₹${(Number.parseFloat(formData.quantity || 0) * Number.parseFloat(formData.rate || 0)).toFixed(2)}`}
-                    readOnly
-                    className="readonly total-amount"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="form-actions">
-              <button type="button" className="btn btn-cancel" onClick={resetForm} disabled={isGenerating}>
+            <div style={{ display: 'flex', gap: '15px', justifyContent: 'flex-end', marginTop: '30px', paddingTop: '20px', borderTop: '2px solid #f1f3f4' }}>
+              <button 
+                type="button" 
+                onClick={resetForm} 
+                disabled={isGenerating}
+                style={{ 
+                  padding: '12px 24px', 
+                  border: 'none', 
+                  borderRadius: '8px', 
+                  fontSize: '14px', 
+                  cursor: isGenerating ? 'not-allowed' : 'pointer',
+                  background: '#6c757d', 
+                  color: 'white',
+                  opacity: isGenerating ? 0.6 : 1
+                }}
+              >
                 Reset Form
               </button>
-              <button type="submit" className="btn btn-save" disabled={isGenerating}>
+              <button 
+                type="submit" 
+                disabled={isGenerating}
+                style={{ 
+                  padding: '12px 24px', 
+                  border: 'none', 
+                  borderRadius: '8px', 
+                  fontSize: '14px', 
+                  cursor: isGenerating ? 'not-allowed' : 'pointer',
+                  background: 'linear-gradient(135deg, #28a745 0%, #20c997 100%)', 
+                  color: 'white',
+                  opacity: isGenerating ? 0.6 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+              >
                 {isGenerating ? (
                   <>
-                    <span className="spinner"></span>
-                    Saving...
+                    <span style={{ 
+                      display: 'inline-block', 
+                      width: '16px', 
+                      height: '16px', 
+                      border: '2px solid #ffffff', 
+                      borderRadius: '50%', 
+                      borderTopColor: 'transparent', 
+                      animation: 'spin 1s ease-in-out infinite' 
+                    }}></span>
+                    Generating...
                   </>
                 ) : (
-                  <>💾 Save Batch Slip</>
+                  "Generate Batch Report"
                 )}
               </button>
             </div>
@@ -636,525 +1048,117 @@ const BatchSlipManagement = ({ onNavigate }) => {
         </div>
       )}
 
-      {/* Batch Slip Details Tab */}
       {activeTab === "details" && (
-        <div className="enhanced-table-container">
-          <div className="table-card">
-            <div className="table-card-header">
-              <div className="table-title">
-                <h3>Saved Batch Slip Records</h3>
-                <div className="table-stats">
-                  <span className="stat-badge">
-                    Total: <strong>{batchSlips.length}</strong>
-                  </span>
-                  <span className="stat-badge">
-                    Showing: <strong>{filteredBatchSlips.length}</strong>
-                  </span>
-                </div>
+        <div style={{ background: 'white', borderRadius: '12px', boxShadow: '0 2px 10px rgba(0, 0, 0, 0.1)', overflow: 'hidden' }}>
+          <div style={{ padding: '20px', background: 'linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)', borderBottom: '2px solid #dee2e6' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, color: '#333', fontSize: '20px' }}>Saved Batch Slip Records</h3>
+              <div style={{ display: 'flex', gap: '15px' }}>
+                <span style={{ padding: '8px 12px', background: 'white', borderRadius: '6px', fontSize: '14px', color: '#495057', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)' }}>
+                  Total: <strong>{batchSlips.length}</strong>
+                </span>
+                <span style={{ padding: '8px 12px', background: 'white', borderRadius: '6px', fontSize: '14px', color: '#495057', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)' }}>
+                  Showing: <strong>{filteredBatchSlips.length}</strong>
+                </span>
               </div>
             </div>
+          </div>
 
-            <div className="table-wrapper">
-              <table className="enhanced-table">
-                <thead>
-                  <tr>
-                    <th>S.No</th>
-                    <th>Batch Number</th>
-                    <th>Batch Date</th>
-                    <th>Customer</th>
-                    <th>Recipe Code</th>
-                    <th>Quantity (M³)</th>
-                    <th>Client Email</th>
-                    <th>Client Address</th>
-                    <th>Status</th>
-                    <th>Actions</th>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+              <thead>
+                <tr style={{ background: '#f8f9fa' }}>
+                  <th style={{ padding: '15px 12px', textAlign: 'left', borderBottom: '1px solid #dee2e6', fontWeight: '600', color: '#495057' }}>S.No</th>
+                  <th style={{ padding: '15px 12px', textAlign: 'left', borderBottom: '1px solid #dee2e6', fontWeight: '600', color: '#495057' }}>Batch Number</th>
+                  <th style={{ padding: '15px 12px', textAlign: 'left', borderBottom: '1px solid #dee2e6', fontWeight: '600', color: '#495057' }}>Batch Date</th>
+                  <th style={{ padding: '15px 12px', textAlign: 'left', borderBottom: '1px solid #dee2e6', fontWeight: '600', color: '#495057' }}>Customer</th>
+                  <th style={{ padding: '15px 12px', textAlign: 'left', borderBottom: '1px solid #dee2e6', fontWeight: '600', color: '#495057' }}>Recipe Code</th>
+                  <th style={{ padding: '15px 12px', textAlign: 'left', borderBottom: '1px solid #dee2e6', fontWeight: '600', color: '#495057' }}>Production Qty (M³)</th>
+                  <th style={{ padding: '15px 12px', textAlign: 'left', borderBottom: '1px solid #dee2e6', fontWeight: '600', color: '#495057' }}>Truck Number</th>
+                  <th style={{ padding: '15px 12px', textAlign: 'left', borderBottom: '1px solid #dee2e6', fontWeight: '600', color: '#495057' }}>Status</th>
+                  <th style={{ padding: '15px 12px', textAlign: 'left', borderBottom: '1px solid #dee2e6', fontWeight: '600', color: '#495057' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredBatchSlips.map((slip, index) => (
+                  <tr key={slip.id} style={{ borderBottom: '1px solid #dee2e6' }}>
+                    <td style={{ padding: '15px 12px' }}>{index + 1}</td>
+                    <td style={{ padding: '15px 12px', fontWeight: '600', color: '#495057' }}>{slip.batchNumber}</td>
+                    <td style={{ padding: '15px 12px' }}>{new Date(slip.batchDate).toLocaleDateString()}</td>
+                    <td style={{ padding: '15px 12px', fontWeight: '600', color: '#495057' }}>{slip.customer}</td>
+                    <td style={{ padding: '15px 12px', fontWeight: '600', color: '#495057' }}>{slip.recipeCode}</td>
+                    <td style={{ padding: '15px 12px', fontWeight: '500', color: '#495057' }}>{slip.productionQuantity}</td>
+                    <td style={{ padding: '15px 12px', fontWeight: '600', color: '#495057' }}>{slip.truckNumber}</td>
+                    <td style={{ padding: '15px 12px' }}>
+                      <span style={{ 
+                        padding: '6px 12px', 
+                        borderRadius: '20px', 
+                        fontSize: '12px', 
+                        fontWeight: '600', 
+                        background: '#d4edda', 
+                        color: '#155724' 
+                      }}>
+                        {slip.status || 'ACTIVE'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '15px 12px' }}>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button style={{ 
+                          padding: '6px 12px', 
+                          border: 'none', 
+                          borderRadius: '4px', 
+                          fontSize: '12px', 
+                          fontWeight: '600', 
+                          cursor: 'pointer',
+                          background: '#17a2b8',
+                          color: 'white'
+                        }}>
+                          View
+                        </button>
+                        <button style={{ 
+                          padding: '6px 12px', 
+                          border: 'none', 
+                          borderRadius: '4px', 
+                          fontSize: '12px', 
+                          fontWeight: '600', 
+                          cursor: 'pointer',
+                          background: '#28a745',
+                          color: 'white'
+                        }}>
+                          Edit
+                        </button>
+                        <button 
+                          onClick={() => handleDelete(slip.id)}
+                          style={{ 
+                            padding: '6px 12px', 
+                            border: 'none', 
+                            borderRadius: '4px', 
+                            fontSize: '12px', 
+                            fontWeight: '600', 
+                            cursor: 'pointer',
+                            background: '#dc3545',
+                            color: 'white'
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {filteredBatchSlips.map((slip, index) => (
-                    <tr key={slip.id}>
-                      <td>{index + 1}</td>
-                      <td>
-                        <span className="batch-number">{slip.batchNumber}</span>
-                      </td>
-                      <td>{new Date(slip.batchDate).toLocaleDateString()}</td>
-                      <td>
-                        <span className="customer-name">{slip.customer}</span>
-                      </td>
-                      <td>
-                        <span className="recipe-code">{slip.recipeCode}</span>
-                      </td>
-                      <td>
-                        <span className="quantity-value">{slip.quantity}</span>
-                      </td>
-                      <td>
-                        <span className="email-text">{slip.clientEmail || "-"}</span>
-                      </td>
-                      <td>
-                        <span className="address-text" title={slip.clientAddress}>
-                          {slip.clientAddress
-                            ? slip.clientAddress.length > 30
-                              ? slip.clientAddress.substring(0, 30) + "..."
-                              : slip.clientAddress
-                            : "-"}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`status ${slip.status.toLowerCase()}`}>{slip.status}</span>
-                      </td>
-                      <td>
-                        <div className="action-buttons-horizontal">
-                          <button className="btn-view-text" title="View Details">
-                            View
-                          </button>
-                          <button className="btn-approve-text" title="Edit">
-                            Edit
-                          </button>
-                          <button className="btn-reject-text" title="Delete" onClick={() => handleDelete(slip.id)}>
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                ))}
+              </tbody>
+            </table>
 
-              {filteredBatchSlips.length === 0 && (
-                <div className="no-data-enhanced">
-                  <div className="no-data-icon">📋</div>
-                  <h4>No Batch Slip Details Found</h4>
-                </div>
-              )}
-            </div>
+            {filteredBatchSlips.length === 0 && (
+              <div style={{ textAlign: 'center', padding: '60px 20px', color: '#6c757d' }}>
+                <div style={{ fontSize: '48px', marginBottom: '15px', opacity: 0.5 }}>📋</div>
+                <h4 style={{ margin: '0 0 10px 0', color: '#495057', fontSize: '18px' }}>No Batch Slip Details Found</h4>
+                <p style={{ color: '#6c757d', fontSize: '14px' }}>Create your first batch slip using the form above</p>
+              </div>
+            )}
           </div>
         </div>
       )}
-
-      <style jsx>{`
-        .batch-slip-management {
-          padding: 20px;
-          max-width: 1600px;
-          margin: 0 auto;
-          background: #f8f9fa;
-          min-height: 100vh;
-        }
-
-        .section-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 20px;
-          padding: 20px;
-          background: white;
-          border-radius: 12px;
-          box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-        }
-
-        .section-title {
-          display: flex;
-          align-items: center;
-          gap: 15px;
-        }
-
-        .section-icon {
-          font-size: 32px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          padding: 15px;
-          border-radius: 12px;
-          color: white;
-          box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-        }
-
-        .section-title h2 {
-          margin: 0;
-          color: #333;
-          font-size: 28px;
-          font-weight: 700;
-        }
-
-        .header-actions {
-          display: flex;
-          gap: 15px;
-          align-items: center;
-        }
-
-        .search-input {
-          padding: 10px 15px;
-          border: 2px solid #e9ecef;
-          border-radius: 8px;
-          font-size: 14px;
-          min-width: 250px;
-        }
-
-        .tab-navigation {
-          display: flex;
-          gap: 10px;
-          margin-bottom: 20px;
-          padding: 0 20px;
-        }
-
-        .tab-button {
-          padding: 12px 24px;
-          border: none;
-          border-radius: 8px;
-          font-size: 16px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.3s ease;
-          background: #e9ecef;
-          color: #495057;
-        }
-
-        .tab-button.active {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white;
-          box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-        }
-
-        .tab-button:hover {
-          transform: translateY(-2px);
-        }
-
-        .batch-slip-form-container {
-          background: white;
-          padding: 25px;
-          border-radius: 12px;
-          box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-        }
-
-        .form-section {
-          margin-bottom: 30px;
-          padding-bottom: 20px;
-          border-bottom: 2px solid #f1f3f4;
-        }
-
-        .form-section h3 {
-          margin: 0 0 10px 0;
-          color: #333;
-          font-size: 24px;
-        }
-
-        .form-section h4 {
-          margin: 0 0 20px 0;
-          color: #495057;
-          font-size: 18px;
-          font-weight: 600;
-        }
-
-        .form-grid-batch {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-          gap: 15px;
-        }
-
-        .form-grid-quantities, .form-grid-client, .form-grid-invoice {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-          gap: 15px;
-        }
-
-        .form-group {
-          display: flex;
-          flex-direction: column;
-          gap: 5px;
-        }
-
-        .form-group label {
-          font-weight: 600;
-          color: #333;
-          font-size: 14px;
-        }
-
-        .form-group input, .form-group select, .form-group textarea {
-          padding: 10px 12px;
-          border: 2px solid #e9ecef;
-          border-radius: 8px;
-          font-size: 14px;
-          transition: border-color 0.3s ease;
-        }
-
-        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
-          outline: none;
-          border-color: #667eea;
-          box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-
-        .form-group input.error, .form-group select.error, .form-group textarea.error {
-          border-color: #dc3545;
-        }
-
-        .error-text {
-          color: #dc3545;
-          font-size: 12px;
-          font-weight: 500;
-        }
-
-        .readonly {
-          background-color: #f8f9fa;
-          cursor: not-allowed;
-        }
-
-        .total-amount {
-          font-weight: bold;
-          color: #28a745;
-        }
-
-        .form-actions {
-          display: flex;
-          gap: 15px;
-          justify-content: flex-end;
-          margin-top: 30px;
-          padding-top: 20px;
-          border-top: 2px solid #f1f3f4;
-        }
-
-        .btn {
-          padding: 12px 24px;
-          border: none;
-          border-radius: 8px;
-          font-size: 14px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.3s ease;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-
-        .btn:hover:not(:disabled) {
-          transform: translateY(-2px);
-        }
-
-        .btn:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-        }
-
-        .btn-cancel {
-          background: #6c757d;
-          color: white;
-        }
-
-        .btn-save {
-          background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-          color: white;
-        }
-
-        .btn-export {
-          background: linear-gradient(135deg, #17a2b8 0%, #20c997 100%);
-          color: white;
-        }
-
-        .btn-generate {
-          background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
-          color: white;
-        }
-
-        .spinner {
-          display: inline-block;
-          width: 16px;
-          height: 16px;
-          border: 2px solid #ffffff;
-          border-radius: 50%;
-          border-top-color: transparent;
-          animation: spin 1s ease-in-out infinite;
-          margin-right: 8px;
-        }
-
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-
-        .enhanced-table-container {
-          background: white;
-          border-radius: 12px;
-          box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-          overflow: hidden;
-        }
-
-        .table-card-header {
-          padding: 20px;
-          background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-          border-bottom: 2px solid #dee2e6;
-        }
-
-        .table-title {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-
-        .table-title h3 {
-          margin: 0;
-          color: #333;
-          font-size: 20px;
-        }
-
-        .table-stats {
-          display: flex;
-          gap: 15px;
-        }
-
-        .stat-badge {
-          padding: 8px 12px;
-          background: white;
-          border-radius: 6px;
-          font-size: 14px;
-          color: #495057;
-          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-
-        .table-wrapper {
-          overflow-x: auto;
-        }
-
-        .enhanced-table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 14px;
-        }
-
-        .enhanced-table th, .enhanced-table td {
-          padding: 15px 12px;
-          text-align: left;
-          border-bottom: 1px solid #dee2e6;
-          vertical-align: middle;
-        }
-
-        .enhanced-table th {
-          background: #f8f9fa;
-          font-weight: 600;
-          color: #495057;
-          position: sticky;
-          top: 0;
-          z-index: 10;
-          font-size: 13px;
-          text-transform: uppercase;
-        }
-
-        .enhanced-table tr:hover {
-          background: #f8f9fa;
-        }
-
-        .batch-number, .customer-name, .recipe-code {
-          font-weight: 600;
-          color: #495057;
-        }
-
-        .quantity-value {
-          font-weight: 500;
-          color: #495057;
-        }
-
-        .email-text, .address-text {
-          font-size: 13px;
-        }
-
-        .status {
-          padding: 6px 12px;
-          border-radius: 20px;
-          font-size: 12px;
-          font-weight: 600;
-          text-transform: uppercase;
-        }
-
-        .status.active {
-          background: #d4edda;
-          color: #155724;
-        }
-
-        .status.pending {
-          background: #fff3cd;
-          color: #856404;
-        }
-
-        .status.inactive {
-          background: #f8d7da;
-          color: #721c24;
-        }
-
-        .action-buttons-horizontal {
-          display: flex;
-          gap: 8px;
-        }
-
-        .btn-view-text, .btn-approve-text, .btn-reject-text {
-          padding: 6px 12px;
-          border: none;
-          border-radius: 4px;
-          font-size: 12px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.3s ease;
-        }
-
-        .btn-view-text {
-          background: #17a2b8;
-          color: white;
-        }
-
-        .btn-approve-text {
-          background: #28a745;
-          color: white;
-        }
-
-        .btn-reject-text {
-          background: #dc3545;
-          color: white;
-        }
-
-        .no-data-enhanced {
-          text-align: center;
-          padding: 60px 20px;
-          color: #6c757d;
-        }
-
-        .no-data-icon {
-          font-size: 48px;
-          margin-bottom: 15px;
-          opacity: 0.5;
-        }
-
-        .no-data-enhanced h4 {
-          margin: 0 0 10px 0;
-          color: #495057;
-          font-size: 18px;
-        }
-
-        @media (max-width: 768px) {
-          .section-header {
-            flex-direction: column;
-            gap: 15px;
-            text-align: center;
-          }
-
-          .header-actions {
-            flex-direction: column;
-            width: 100%;
-          }
-
-          .search-input {
-            width: 100%;
-          }
-
-          .tab-navigation {
-            flex-direction: column;
-          }
-
-          .form-grid-batch, .form-grid-quantities, .form-grid-client, .form-grid-invoice {
-            grid-template-columns: 1fr;
-          }
-
-          .form-actions {
-            flex-direction: column;
-          }
-
-          .action-buttons-horizontal {
-            flex-direction: column;
-          }
-        }
-      `}</style>
     </div>
   )
 }
