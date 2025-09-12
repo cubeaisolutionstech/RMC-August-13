@@ -1,4 +1,5 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
+from flask_cors import CORS
 from flask_cors import CORS
 from db_config import get_db_connection
 import mysql.connector
@@ -8,15 +9,19 @@ import pyodbc
 import pandas_access as mdb
 import pandas as pd
 import os
+import bcrypt
 import re
 import requests
 from werkzeug.utils import secure_filename
 import tempfile
 from license_plate_service import process_vehicle_video, create_new_vehicles_table
 from datetime import timedelta
+import base64
+from io import BytesIO
+from PIL import Image
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app)
 
 # Configure upload folder
 UPLOAD_FOLDER = 'uploads'
@@ -80,6 +85,19 @@ def init_db():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         )
     ''')
+        # Create user_signin table
+    cursor.execute('''
+   CREATE TABLE IF NOT EXISTS user_signin (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    phone_number VARCHAR(15),
+    status ENUM('Active', 'Inactive') DEFAULT 'Active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+)
+''')
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS purchase_orders (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -364,7 +382,7 @@ CREATE TABLE IF NOT EXISTS invoice_items (
     supplier_name VARCHAR(255),
     invoice_number VARCHAR(100),
     invoice_date DATE,
-    gstin VARCHAR(15),
+    gstin VARCHAR(20),
     address TEXT,
     empty_weight DECIMAL(10,2),
     load_weight DECIMAL(10,2),
@@ -406,31 +424,55 @@ CREATE TABLE IF NOT EXISTS invoice_items (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
-    # Create supplier table
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS supplier (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            poNumber VARCHAR(50) NOT NULL,
-            poBalanceQty DECIMAL(10,2) NOT NULL,
-            inwardNo VARCHAR(50) NOT NULL,
-            vehicleNo VARCHAR(50) NOT NULL,
-            dateTime DATETIME NOT NULL,
-            supplierName VARCHAR(255) NOT NULL,
-            material VARCHAR(255) NOT NULL,
-            uom VARCHAR(50) DEFAULT 'tons',
-            receivedQty DECIMAL(10,2),
-            receivedBy VARCHAR(255),
-            supplierBillQty DECIMAL(10,2),
-            poRate DECIMAL(10,2) NOT NULL,
-            supplierBillRate DECIMAL(10,2),
-            supplierBillFile VARCHAR(255),
-            difference DECIMAL(10,2),
-            status ENUM('Pending', 'Approved', 'Rejected') DEFAULT 'Pending',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        )
-    ''')
+    CREATE TABLE IF NOT EXISTS supplier (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    poNumber VARCHAR(50) NOT NULL,
+    poBalanceQty DECIMAL(10,2) NOT NULL,
+    inwardNo VARCHAR(50) NOT NULL,
+    vehicleNo VARCHAR(50) NOT NULL,
+    dateTime DATETIME NOT NULL,
+    supplierName VARCHAR(255) NOT NULL,
+    material VARCHAR(255) NOT NULL,
+    uom VARCHAR(50) DEFAULT 'tons',
+    orderedQty DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    receivedQty DECIMAL(10,2),
+    receivedBy VARCHAR(255),
+    supplierBillQty DECIMAL(10,2),
+    poRate DECIMAL(10,2) NOT NULL,
+    supplierBillRate DECIMAL(10,2),
+    supplierBillFile VARCHAR(255),
+    difference DECIMAL(10,2),
+    status ENUM('Pending', 'Approved', 'Rejected') DEFAULT 'Pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+                   ''')
+
+    # Create supplier table
+    # cursor.execute('''
+    #     CREATE TABLE IF NOT EXISTS supplier (
+    #         id INT AUTO_INCREMENT PRIMARY KEY,
+    #         poNumber VARCHAR(50) NOT NULL,
+    #         poBalanceQty DECIMAL(10,2) NOT NULL,
+    #         inwardNo VARCHAR(50) NOT NULL,
+    #         vehicleNo VARCHAR(50) NOT NULL,
+    #         dateTime DATETIME NOT NULL,
+    #         supplierName VARCHAR(255) NOT NULL,
+    #         material VARCHAR(255) NOT NULL,
+    #         uom VARCHAR(50) DEFAULT 'tons',
+    #         receivedQty DECIMAL(10,2),
+    #         receivedBy VARCHAR(255),
+    #         supplierBillQty DECIMAL(10,2),
+    #         poRate DECIMAL(10,2) NOT NULL,
+    #         supplierBillRate DECIMAL(10,2),
+    #         supplierBillFile VARCHAR(255),
+    #         difference DECIMAL(10,2),
+    #         status ENUM('Pending', 'Approved', 'Rejected') DEFAULT 'Pending',
+    #         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    #         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    #     )
+    # ''')
     
     # Create vehicles table with updated structure
     cursor.execute('''
@@ -788,57 +830,57 @@ def create_batch_slip():
             conn.close()
 
 # Login Authentication Route
-@app.route('/login', methods=['POST'])
-def login():
-    data = request.json
-    username = data.get('username')
-    password = data.get('password')
+# @app.route('/login', methods=['POST'])
+# def login():
+#     data = request.json
+#     username = data.get('username')
+#     password = data.get('password')
     
-    if not username or not password:
-        return jsonify({'error': 'Username and password required'}), 400
+#     if not username or not password:
+#         return jsonify({'error': 'Username and password required'}), 400
     
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
+#     conn = get_db_connection()
+#     cursor = conn.cursor(dictionary=True)
     
-    query = '''
-        SELECT l.*, e.full_name, b.branch_name 
-        FROM login l
-        LEFT JOIN employees e ON l.employee_id = e.id
-        LEFT JOIN branches b ON l.branch_id = b.id
-        WHERE l.username = %s AND l.password = %s AND l.status = 'Active'
-    '''
+#     query = '''
+#         SELECT l.*, e.full_name, b.branch_name 
+#         FROM login l
+#         LEFT JOIN employees e ON l.employee_id = e.id
+#         LEFT JOIN branches b ON l.branch_id = b.id
+#         WHERE l.username = %s AND l.password = %s AND l.status = 'Active'
+#     '''
     
-    cursor.execute(query, (username, password))
-    user = cursor.fetchone()
+#     cursor.execute(query, (username, password))
+#     user = cursor.fetchone()
     
-    if user:
-        # Update last login
-        cursor.execute('UPDATE login SET last_login = %s WHERE id = %s', 
-                      (datetime.now(), user['id']))
-        conn.commit()
+#     if user:
+#         # Update last login
+#         cursor.execute('UPDATE login SET last_login = %s WHERE id = %s', 
+#                       (datetime.now(), user['id']))
+#         conn.commit()
         
-        # Log login activity
-        log_system_activity(
-            user.get('branch_name', 'Main Branch'),
-            'System',
-            'Login',
-            username,
-            'System Login',
-            request.remote_addr
-        )
+#         # Log login activity
+#         log_system_activity(
+#             user.get('branch_name', 'Main Branch'),
+#             'System',
+#             'Login',
+#             username,
+#             'System Login',
+#             request.remote_addr
+#         )
         
-        return jsonify({
-            'success': True,
-            'user': {
-                'id': user['id'],
-                'username': user['username'],
-                'role': user['role'],
-                'full_name': user['full_name'],
-                'branch_name': user['branch_name']
-            }
-        })
-    else:
-        return jsonify({'error': 'Invalid credentials'}), 401
+#         return jsonify({
+#             'success': True,
+#             'user': {
+#                 'id': user['id'],
+#                 'username': user['username'],
+#                 'role': user['role'],
+#                 'full_name': user['full_name'],
+#                 'branch_name': user['branch_name']
+#             }
+#         })
+#     else:
+#         return jsonify({'error': 'Invalid credentials'}), 401
     # finally:
     #     if 'cursor' in locals():
     #         cursor.close()
@@ -3047,103 +3089,206 @@ def update_po(id):
 
 
 # Supplier Routes - UPDATED
-@app.route("/supplier", methods=["GET"])
-def get_all_suppliers():
+@app.route('/supplier', methods=['GET'])
+def get_suppliers():
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM supplier ORDER BY id DESC")
-        result = cursor.fetchall()
-        return jsonify(result)
+        
+        # Fetch all supplier data
+        cursor.execute("SELECT * FROM supplier ORDER BY created_at DESC")
+        suppliers = cursor.fetchall()
+        
+        formatted_suppliers = []
+        
+        for supplier in suppliers:
+            file_path = supplier['supplierBillFile']
+            voucher_no = None
+            
+            if file_path:
+                # Extract the filename from the path
+                filename = os.path.basename(file_path)
+                
+                # Use regex to find a numeric sequence in the filename
+                match = re.search(r'\d+', filename)
+                if match:
+                    voucher_no = match.group(0)
+            
+            formatted_supplier = {
+                'id': supplier['id'],
+                'poNumber': supplier['poNumber'],
+                'poBalanceQty': float(supplier['poBalanceQty']) if supplier['poBalanceQty'] is not None else None,
+                'inwardNo': supplier['inwardNo'],
+                'vehicleNo': supplier['vehicleNo'],
+                'dateTime': supplier['dateTime'].isoformat() if supplier['dateTime'] else None,
+                'supplierName': supplier['supplierName'],
+                'material': supplier['material'],
+                'uom': supplier['uom'],
+                'receivedQty': float(supplier['receivedQty']) if supplier['receivedQty'] is not None else None,
+                'receivedBy': supplier['receivedBy'],
+                'supplierBillQty': float(supplier['supplierBillQty']) if supplier['supplierBillQty'] is not None else None,
+                'poRate': float(supplier['poRate']) if supplier['poRate'] is not None else None,
+                'supplierBillRate': float(supplier['supplierBillRate']) if supplier['supplierBillRate'] is not None else None,
+                'supplierBillFile': supplier['supplierBillFile'],
+                'voucherNo': voucher_no,  # <-- Extracted voucher number
+                'difference': float(supplier['difference']) if supplier['difference'] is not None else None,
+                'status': supplier['status'],
+                'created_at': supplier['created_at'].isoformat() if supplier['created_at'] else None,
+                'updated_at': supplier['updated_at'].isoformat() if supplier['updated_at'] else None,
+                'orderedQty': float(supplier['orderedQty']) if supplier['orderedQty'] is not None else None
+            }
+            
+            formatted_suppliers.append(formatted_supplier)
+        
+        # Log the activity
+        log_system_activity(
+            'Main Branch',
+            'Supplier Data',
+            'View',
+            'System',
+            'Fetched supplier data',
+            request.remote_addr
+        )
+        
+        return jsonify(formatted_suppliers), 200
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
     finally:
-        conn.close()
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()# Configure upload folder
+UPLOAD_FOLDER = 'uploads'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+
+
+@app.route('/uploads/<path:filename>')
+def uploaded_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 @app.route("/supplier", methods=["POST"])
 def add_supplier():
     try:
-        data = request.json
+        # Print incoming request to console
+        print(f"Received POST /supplier request from {request.remote_addr}")
+        print(f"Form data: {request.form.to_dict()}")
+        print(f"Files: {request.files.keys()}")
+
+        # Validate form data
+        if not request.form:
+            print("Error: No form data provided")
+            return jsonify({"error": "Form data is required"}), 400
+
+        data = request.form.to_dict()
         required_fields = [
             "poNumber", "poBalanceQty", "inwardNo", "vehicleNo", "dateTime",
-            "supplierName", "material", "poRate"
+            "supplierName", "material", "poRate", "receivedQty"
         ]
         missing = [f for f in required_fields if not str(data.get(f, '')).strip()]
         if missing:
+            print(f"Error: Missing required fields: {', '.join(missing)}")
             return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
 
-        # Calculate difference
-        po_rate = float(data.get('poRate', 0))
-        supplier_bill_rate = float(data.get('supplierBillRate', 0))
-        difference = po_rate - supplier_bill_rate
+        # Validate and convert numeric fields
+        try:
+            po_balance_qty = float(data["poBalanceQty"])
+            po_rate = float(data["poRate"])
+            received_qty = float(data["receivedQty"])
+            ordered_qty = float(data.get("orderedQty", 0)) if data.get("orderedQty") else None
+            # Calculate difference and supplierBillRate
+            difference = po_balance_qty * po_rate
+            supplier_bill_rate = received_qty * po_rate
+            print(f"Calculated: difference = {difference}, supplierBillRate = {supplier_bill_rate}")
+        except (ValueError, TypeError) as e:
+            print(f"Error: Invalid numeric field: {str(e)}")
+            return jsonify({"error": f"Invalid numeric field: {str(e)}"}), 400
 
+        # Handle file upload (optional)
+        db_file_path = None
+        if 'supplierBillFile' in request.files and request.files['supplierBillFile'].filename:
+            file = request.files['supplierBillFile']
+            if file.filename == '':
+                print("Error: No file selected")
+                return jsonify({"error": "No file selected"}), 400
+
+            # Save file to disk
+            filename = secure_filename(file.filename)
+            base, ext = os.path.splitext(filename)
+            counter = 1
+            while os.path.exists(os.path.join(app.config['UPLOAD_FOLDER'], filename)):
+                filename = f"{base}_{counter}{ext}"
+                counter += 1
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(file_path)
+            db_file_path = f"uploads/{filename}"
+            print(f"Saved file: {file_path}")
+
+        # Check for duplicate inwardNo
         conn = get_db_connection()
         cursor = conn.cursor()
+        cursor.execute("SELECT id FROM supplier WHERE inwardNo = %s", 
+                      (data["inwardNo"],))
+        if cursor.fetchone():
+            print(f"Error: Duplicate inwardNo {data['inwardNo']}")
+            return jsonify({"error": f"Inward No {data['inwardNo']} already exists"}), 409
 
+        # Insert into database with frontend-provided fields and calculated fields
         query = """
         INSERT INTO supplier
         (poNumber, poBalanceQty, inwardNo, vehicleNo, dateTime, supplierName,
-         material, uom, receivedQty, receivedBy, supplierBillQty, poRate, 
-         supplierBillRate, supplierBillFile, difference, status)
+         material, uom, receivedQty, receivedBy, poRate, status, orderedQty,
+         supplierBillFile, difference, supplierBillRate)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
-
         values = (
-            data["poNumber"], data["poBalanceQty"], data["inwardNo"], data["vehicleNo"],
-            data["dateTime"], data["supplierName"], data["material"], 
-            data.get("uom", "tons"), data.get("receivedQty"), data.get("receivedBy"),
-            data.get("supplierBillQty"), data["poRate"], data.get("supplierBillRate"),
-            data.get("supplierBillFile"), difference, data.get("status", "Pending")
+            data["poNumber"],
+            po_balance_qty,
+            data["inwardNo"],
+            data["vehicleNo"],
+            data["dateTime"],
+            data["supplierName"],
+            data["material"],
+            data.get("uom", "CFT"),
+            received_qty,
+            data.get("receivedBy", None),
+            po_rate,
+            data.get("status", "Pending"),
+            ordered_qty,
+            db_file_path,
+            difference,
+            supplier_bill_rate
         )
 
+        print(f"Executing query: {query % values}")
         cursor.execute(query, values)
         conn.commit()
-        
+
         # Log the activity
         log_system_activity(
             'Main Branch',
             'Supplier Details',
             'Add',
             'System',
-            f"Supplier {data['supplierName']} - Vehicle {data['vehicleNo']}",
+            f"Supplier {data['supplierName']} - Vehicle {data['vehicleNo']} with bill file {filename if db_file_path else 'None'}",
             request.remote_addr
         )
-        
-        return jsonify({"message": "Supplier detail added successfully!"}), 201
+
+        print("Supplier detail added successfully")
+        return jsonify({
+            "message": "Supplier detail added successfully!",
+            "file_path": db_file_path
+        }), 201
 
     except Exception as e:
+        print(f"Error in add_supplier: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
     finally:
         if 'conn' in locals():
-            conn.close()
-
-@app.route("/supplier/<int:id>", methods=["PUT"])
-def update_supplier(id):
-    try:
-        data = request.json
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        query = "UPDATE supplier SET status = %s WHERE id = %s"
-        cursor.execute(query, (data.get('status'), id))
-        conn.commit()
-        
-        # Log the activity
-        log_system_activity(
-            'Main Branch',
-            'Supplier Details',
-            'Update',
-            'System',
-            f"Supplier ID {id}",
-            request.remote_addr
-        )
-        
-        return jsonify({"message": "Supplier updated successfully!"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    finally:
-        conn.close()
-
-@app.route("/api/po-details", methods=["GET"])
+            conn.close()@app.route("/api/po-details", methods=["GET"])
 def get_po_details():
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
@@ -3393,6 +3538,152 @@ def get_combined_payment_supplier_details():
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+    
+    if not username or not password:
+        return jsonify({'error': 'Username and password are required'}), 400
+    
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        # Query the user_signin table
+        query = '''
+            SELECT id, username, password, email, phone_number 
+            FROM user_signin 
+            WHERE username = %s AND status = 'Active'
+        '''
+        
+        cursor.execute(query, (username,))
+        user = cursor.fetchone()
+        
+        if user and bcrypt.checkpw(password.encode('utf-8'), user['password'].encode('utf-8')):
+            # Update last login (optional, add last_login column to user_signin if needed)
+            cursor.execute('UPDATE user_signin SET updated_at = %s WHERE id = %s', 
+                         (datetime.now(), user['id']))
+            conn.commit()
+            
+            # Log login activity
+            log_system_activity(
+                'Main Branch',
+                'System',
+                'Login',
+                username,
+                'System Login',
+                request.remote_addr
+            )
+            
+            return jsonify({
+                'success': True,
+                'user': {
+                    'id': user['id'],
+                    'username': user['username'],
+                    'email': user['email'],
+                    'phone_number': user['phone_number'],
+                    # Add role and other fields if needed
+                    'role': 'user',  # Default role, modify as needed
+                    'full_name': user['username'],  # Adjust if you add full_name to user_signin
+                    'branch_name': 'Main Branch'  # Adjust if you add branch info
+                }
+            })
+        else:
+            return jsonify({'error': 'Invalid username or password'}), 401
+            
+    except Exception as e:
+        print(f"Error during login: {str(e)}")
+        return jsonify({'error': f'Login error: {str(e)}'}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+# Signup Route
+@app.route('/signup', methods=['POST'])
+def signup():
+    try:
+        data = request.json
+        username = data.get('username')
+        password = data.get('password')
+        email = data.get('email')
+        phone_number = data.get('phone')  # Changed to match frontend payload
+        
+        # Validate required fields
+        if not all([username, password, email]):
+            return jsonify({'error': 'Username, password, and email are required'}), 400
+        
+        # Validate email format
+        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_regex, email):
+            return jsonify({'error': 'Invalid email format'}), 400
+        
+        # Validate phone number format (optional, but if provided, check format)
+        if phone_number and not re.match(r'^\+?[\d\s-]{8,15}$', phone_number):
+            return jsonify({'error': 'Invalid phone number format'}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        # Check for existing username
+        cursor.execute('SELECT id FROM user_signin WHERE username = %s', (username,))
+        if cursor.fetchone():
+            return jsonify({'error': 'Username already exists'}), 409
+        
+        # Check for existing email
+        cursor.execute('SELECT id FROM user_signin WHERE email = %s', (email,))
+        if cursor.fetchone():
+            return jsonify({'error': 'Email already exists'}), 409
+        
+        # Hash the password
+        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        
+        # Insert new user into user_signin table
+        query = '''
+            INSERT INTO user_signin (username, password, email, phone_number, status)
+            VALUES (%s, %s, %s, %s, %s)
+        '''
+        values = (username, hashed_password, email, phone_number, 'Active')
+        
+        cursor.execute(query, values)
+        conn.commit()
+        
+        # Log the signup activity
+        log_system_activity(
+            'Main Branch',
+            'System',
+            'Signup',
+            username,
+            'User Registration',
+            request.remote_addr
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': 'User registered successfully',
+            'user': {
+                'username': username,
+                'email': email,
+                'phone_number': phone_number
+            }
+        }), 201
+        
+    except mysql.connector.Error as db_error:
+        print(f"Database error during signup: {str(db_error)}")
+        return jsonify({'error': f'Database error: {str(db_error)}'}), 500
+    except Exception as e:
+        print(f"General error during signup: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()    
 
 if __name__ == '__main__':
     init_db()
