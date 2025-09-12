@@ -36,7 +36,7 @@ const Sidebar = ({ activeSection, setActiveSection, collapsed, setCollapsed }) =
       submenu: [
         { id: "vehicle-entry", title: "Vehicle Entry", icon: "🚛" },
         //{ id: "po-details", title: "PO Details", icon: "📋" },
-        //{ id: "intent", title: "Intent", icon: "📝" },
+        { id: "intent", title: "Intent", icon: "📝" },
         { id: "purchase-order", title: "Purchase Order", icon: "📋" },
         { id: "grn", title: "GRN", icon: "📊" },
         { id: "supplier-detail", title: "Upload Supplier Detail", icon: "📄" },
@@ -46,7 +46,7 @@ const Sidebar = ({ activeSection, setActiveSection, collapsed, setCollapsed }) =
         //{ id: "create-batch-slip", title: "Create Batch Slip", icon: "📝" },
         //{ id: "invoices", title: "Invoices", icon: "🧾" },
         //{ id: "invoice-payment-details", title: "Invoice Payment Details", icon: "💳" },
-        { id: "inventory-management", title: "Inventory Dashboard", icon: "📦" },
+        //{ id: "inventory-management", title: "Inventory Dashboard", icon: "📦" },
       ],
     },
        {
@@ -68,12 +68,7 @@ const Sidebar = ({ activeSection, setActiveSection, collapsed, setCollapsed }) =
         //{ id: "inventory-management", title: "Inventory Dashboard", icon: "📦" },
       ],
     },
-    {
-      id: "logs",
-      title: "Logs",
-      icon: "📝",
-      single: true,
-    },
+   
   ]
 
   return (
